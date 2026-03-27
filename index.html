@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>UX Findings Dashboard — Zoom Desktop Study</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { font-family: 'Inter', system-ui, sans-serif; box-sizing: border-box; }
+    body { margin: 0; background: #f8fafc; }
+    .scrollable { overflow-y: auto; height: calc(100vh - 52px); }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState } = React;
+
+    /* ── Data ─────────────────────────────────────────────────────────────── */
+    const NAV = [
+      { id: 'summary',         label: 'Executive Summary' },
+      { id: 'usability',       label: 'Usability Testing' },
+      { id: 'pure',            label: 'PURE Study' },
+      { id: 'ai',              label: 'AI Evaluation' },
+      { id: 'comparative',     label: 'Comparative Analysis' },
+      { id: 'recommendations', label: 'Recommendations' },
+    ];
+
+    const MS = {
+      usability: { label: 'Usability Testing', short: 'UT',   dot: '#3b82f6', bg: '#eff6ff', text: '#1d4ed8', border: '#bfdbfe' },
+      pure:      { label: 'PURE Study',        short: 'PURE', dot: '#f59e0b', bg: '#fffbeb', text: '#b45309', border: '#fde68a' },
+      ai:        { label: 'AI Evaluation',     short: 'AI',   dot: '#10b981', bg: '#ecfdf5', text: '#065f46', border: '#a7f3d0' },
+    };
+
+    const SHARED = [
+      { id:'I04', label:'Entry path inconsistency (browser vs. app)',   methods:['usability','pure','ai'], sev:'critical' },
+      { id:'I14', label:'Portion of Screen option is hard to find',     methods:['usability','pure','ai'], sev:'critical' },
+      { id:'I20', label:'Video sound sharing off by default',           methods:['usability','pure','ai'], sev:'critical' },
+      { id:'I16', label:'Advanced tab has low visibility',              methods:['pure','ai'],             sev:'high' },
+      { id:'I02', label:'Audio setup is cognitively demanding',         methods:['usability','pure'],      sev:'high' },
+      { id:'I15', label:'Wrong location for partial screen share',      methods:['usability','pure'],      sev:'high' },
+      { id:'I18', label:'Green selection frame hard to manipulate',     methods:['usability','pure'],      sev:'medium' },
+      { id:'I01', label:'Audio test option is hard to find',            methods:['usability','ai'],        sev:'medium' },
+    ];
+
+    /* ── Small components ─────────────────────────────────────────────────── */
+    const Badge = ({ method }) => {
+      const s = MS[method];
+      return (
+        <span style={{ background: s.bg, color: s.text, border: `1px solid ${s.border}` }}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold">
+          <span style={{ background: s.dot }} className="w-1.5 h-1.5 rounded-full inline-block"></span>
+          {s.label}
+        </span>
+      );
+    };
+
+    const Pill = ({ level }) => {
+      const map = { easy:'#d1fae5:#065f46', medium:'#fef3c7:#92400e', hard:'#fee2e2:#991b1b' };
+      const [bg, fg] = (map[level] || map.medium).split(':');
+      return (
+        <span style={{ background: bg, color: fg }}
+          className="px-2 py-0.5 rounded text-xs font-semibold capitalize">{level}</span>
+      );
+    };
+
+    const StatCard = ({ value, label, sub }) => (
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+        <div className="text-3xl font-bold text-slate-800">{value}</div>
+        <div className="text-sm font-semibold text-slate-600 mt-0.5">{label}</div>
+        {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
+      </div>
+    );
+
+    const IssueTag = ({ id, label, sev }) => {
+      const colors = {
+        critical: 'bg-red-50 border-red-200 text-red-700',
+        high:     'bg-orange-50 border-orange-200 text-orange-700',
+        medium:   'bg-slate-50 border-slate-200 text-slate-600',
+      };
+      return (
+        <div className={`flex items-start gap-2 p-3 rounded-lg border text-sm ${colors[sev] || colors.medium}`}>
+          <span className="font-mono text-xs font-bold opacity-50 mt-0.5 flex-shrink-0">{id}</span>
+          <span>{label}</span>
+        </div>
+      );
+    };
+
+    /* ── Icon helpers ───────────────────────────────────────────────────────── */
+    const ChevronDown = () => <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>;
+    const ChevronUp   = () => <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7"/></svg>;
+    const CheckIcon   = () => <svg className="w-3.5 h-3.5 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>;
+
+    /* ── Section: Executive Summary ──────────────────────────────────────── */
+    const SummarySection = () => (
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800 mb-1">Executive Summary</h2>
+        <p className="text-slate-400 text-sm mb-6">Zoom Desktop · Multi-Method UX Evaluation</p>
+        <p className="text-slate-500 mb-6 max-w-2xl text-sm leading-relaxed">
+          A three-method evaluation of <strong className="text-slate-700">Zoom Desktop</strong> identified <strong className="text-slate-700">26 unique usability issues</strong>. All methods independently converged on three critical problems. Task 3 (screen sharing) was the hardest across every method.
+        </p>
+
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          <StatCard value="3"  label="Evaluation Methods"  sub="Usability · PURE · AI" />
+          <StatCard value="26" label="Issues Identified"   sub="Across all methods" />
+          <StatCard value="3"  label="Tasks Evaluated"     sub="Join · Chat · Screen Share" />
+        </div>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Method Overview</h3>
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          {[
+            { m:'usability', count:25, desc:'Widest issue coverage. Revealed real user hesitation, confusion, and expectation mismatch.' },
+            { m:'pure',      count:7,  desc:'Pinpointed high-friction workflow steps with structured precision.' },
+            { m:'ai',        count:5,  desc:'Exposed major structural problems and cascading path-dependency failures.' },
+          ].map(({ m, count, desc }) => (
+            <div key={m} style={{ borderColor: MS[m].border, background: MS[m].bg }}
+              className="rounded-xl border p-4">
+              <div className="flex items-center justify-between mb-2">
+                <Badge method={m} />
+                <span style={{ color: MS[m].dot }} className="text-2xl font-bold">{count}</span>
+              </div>
+              <p className="text-xs text-slate-500">{desc}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-blue-900 text-white rounded-xl p-5 mb-6">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0 text-sm font-bold">!</div>
+            <div>
+              <p className="font-semibold mb-1">Critical Finding — Task 3: Screen Sharing</p>
+              <p className="text-sm text-blue-200">The screen sharing task was the most difficult across every method. Joining via browser silently removes the Share Screen button — with no warning at the decision point, leaving users stuck with no recovery path.</p>
+            </div>
+          </div>
+        </div>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">How the Methods Complement Each Other</h3>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { m:'usability', desc:'Shows real user behavior, emotional response, and where users hesitate or get stuck.' },
+            { m:'pure',      desc:'Shows where workflow friction is most concentrated across standardized steps.' },
+            { m:'ai',        desc:'Shows how visible cues and early path choices cascade into downstream failures.' },
+          ].map(({ m, desc }) => (
+            <div key={m} className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
+              <div className="mb-2"><Badge method={m} /></div>
+              <p className="text-xs text-slate-500">{desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+
+    /* ── Section: Usability Testing ──────────────────────────────────────── */
+    const UsabilitySection = () => {
+      const [open, setOpen] = useState(null);
+      const tasks = [
+        { id:1, label:'Task 1 — Join & Test Audio', level:'medium', findings:[
+          'App launch failure with no error caused silent fallback to browser join',
+          '"Test Speaker & Microphone" buried inside audio caret menu — not visible',
+          'Two simultaneous permission dialogs (browser + Zoom) created confusion',
+          'No confirmation of mic state; unclear if microphone was active',
+        ]},
+        { id:2, label:'Task 2 — Private Chat & Captions', level:'medium', findings:[
+          'Default recipient "Meeting Group Chat" risks accidental public message',
+          'Switching to private (host) requires clicking a non-obvious chip tag',
+          'Captions hidden inside "More" menu — low discoverability for new users',
+          'No confirmation of who received the private message',
+        ]},
+        { id:3, label:'Task 3 — Share Screen with Sound', level:'hard', findings:[
+          'Browser join silently removes the Share Screen button — zero warning',
+          '"Portion of Screen" not visible until navigating deep into share flow',
+          'Sound sharing disabled by default with no visible toggle or indicator',
+          'Green crop-selection frame was difficult to position accurately',
+        ]},
+      ];
+      return (
+        <div>
+          <div className="mb-2"><Badge method="usability" /></div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-1">Usability Testing</h2>
+          <p className="text-slate-500 text-sm mb-6 max-w-2xl leading-relaxed">Think-aloud protocol with real users. Uncovered the widest range of issues — including emotional responses, hesitation, and expectation mismatches invisible to other methods.</p>
+
+          <div className="grid grid-cols-3 gap-4 mb-8">
+            <StatCard value="25" label="Issues Found"     sub="Broadest coverage" />
+            <StatCard value="3"  label="Tasks Evaluated"  sub="All tasks covered" />
+            <StatCard value="1"  label="Task Abandoned"   sub="Screen share blocked by browser" />
+          </div>
+
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Task Breakdown</h3>
+          <div className="space-y-2 mb-8">
+            {tasks.map(t => (
+              <div key={t.id} className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                <button className="w-full flex items-center justify-between p-4 text-left hover:bg-slate-50 transition-colors"
+                  onClick={() => setOpen(open === t.id ? null : t.id)}>
+                  <div className="flex items-center gap-3">
+                    <span className="font-semibold text-slate-700 text-sm">{t.label}</span>
+                    <Pill level={t.level} />
+                  </div>
+                  <span className="text-slate-400">{open === t.id ? <ChevronUp/> : <ChevronDown/>}</span>
+                </button>
+                {open === t.id && (
+                  <div className="border-t border-gray-50 px-4 pb-4 pt-3">
+                    <ul className="space-y-2">
+                      {t.findings.map((f,i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm text-slate-500">
+                          <span className="text-blue-400 mt-0.5 flex-shrink-0">•</span>{f}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Issue Theme Frequency</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label:'Learnability',            count:22 },
+              { label:'Discoverability',          count:14 },
+              { label:'Feedback & Clarity',       count:11 },
+              { label:'Cognitive Load',           count:11 },
+              { label:'Control & Interaction',    count:11 },
+              { label:'Consistency / Context',    count:7  },
+            ].map(t => (
+              <div key={t.label} className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-semibold text-blue-800 text-sm">{t.label}</span>
+                  <span className="text-blue-500 font-bold text-sm">{t.count}</span>
+                </div>
+                <div className="h-1.5 bg-blue-100 rounded-full">
+                  <div className="h-full bg-blue-400 rounded-full" style={{ width:`${(t.count/22)*100}%` }}></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    /* ── Section: PURE Study ─────────────────────────────────────────────── */
+    const PURESection = () => (
+      <div>
+        <div className="mb-2"><Badge method="pure" /></div>
+        <h2 className="text-2xl font-bold text-slate-800 mb-1">PURE Study</h2>
+        <p className="text-slate-500 text-sm mb-6 max-w-2xl leading-relaxed">Structured expert walkthrough evaluating each workflow step. Fewer overall issues, but precisely identified friction hotspots — especially in the screen sharing sequence.</p>
+
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          <StatCard value="7"  label="Issues Found"            sub="High precision" />
+          <StatCard value="3"  label="Friction Hotspots"       sub="Entry · Audio · Share" />
+          <StatCard value="6"  label="Issues Shared w/ Others" sub="High cross-method validity" />
+        </div>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Friction Hotspots</h3>
+        <div className="space-y-3 mb-8">
+          {[
+            { step:'Meeting Entry',      friction:'high',     desc:'App vs. browser choice lacks feature transparency. No warning about disabled capabilities when joining from browser.' },
+            { step:'Audio Configuration', friction:'medium',  desc:'Audio test buried in caret menu. Setup is text-heavy and requires multiple steps to confirm microphone is working.' },
+            { step:'Screen Sharing Setup', friction:'critical', desc:'"Portion of Screen" requires deep menu navigation. Sound sharing off by default with no confirmation during setup.' },
+          ].map(({ step, friction, desc }) => {
+            const styles = {
+              critical: { wrap:'bg-red-50 border-red-200', text:'text-red-700', badge:'bg-red-100 text-red-700' },
+              high:     { wrap:'bg-orange-50 border-orange-200', text:'text-orange-700', badge:'bg-orange-100 text-orange-700' },
+              medium:   { wrap:'bg-amber-50 border-amber-200', text:'text-amber-700', badge:'bg-amber-100 text-amber-700' },
+            }[friction];
+            return (
+              <div key={step} className={`rounded-xl border p-4 ${styles.wrap}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className={`font-semibold text-sm ${styles.text}`}>{step}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles.badge}`}>{friction} friction</span>
+                </div>
+                <p className={`text-xs ${styles.text}`}>{desc}</p>
+              </div>
+            );
+          })}
+        </div>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Issues Identified</h3>
+        <div className="space-y-2">
+          {[
+            { id:'I04', label:'Entry path inconsistency (browser vs. app)',       sev:'critical' },
+            { id:'I14', label:'Portion of Screen option is hard to find',         sev:'critical' },
+            { id:'I20', label:'Video sound sharing off by default or too hidden',  sev:'critical' },
+            { id:'I16', label:'Advanced tab has low visibility',                   sev:'high' },
+            { id:'I02', label:'Audio setup is text-heavy and cognitively demanding',sev:'high' },
+            { id:'I15', label:'Users look in the wrong place for partial screen share', sev:'high' },
+            { id:'I18', label:'Green selection frame is hard to manipulate',      sev:'medium' },
+          ].map(i => <IssueTag key={i.id} {...i} />)}
+        </div>
+      </div>
+    );
+
+    /* ── Section: AI Evaluation ──────────────────────────────────────────── */
+    const AISection = () => (
+      <div>
+        <div className="mb-2"><Badge method="ai" /></div>
+        <h2 className="text-2xl font-bold text-slate-800 mb-1">AI Evaluation</h2>
+        <p className="text-slate-500 text-sm mb-6 max-w-2xl leading-relaxed">Heuristic analysis augmented by AI. Found fewer total issues but uncovered deep structural problems — especially how one early decision silently disables a key feature later in the flow.</p>
+
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          <StatCard value="5" label="Issues Found"         sub="Deep structural focus" />
+          <StatCard value="3" label="Shared With All Methods" sub="High convergence" />
+          <StatCard value="1" label="Critical Chain Found"   sub="Path dependency cascade" />
+        </div>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Path Dependency — Critical Issue Chain</h3>
+        <div className="bg-slate-900 text-white rounded-xl p-5 mb-8">
+          <div className="space-y-3">
+            {[
+              { n:'1', label:'App fails to open on meeting link click',          note:'No error reason shown',        color:'#3b82f6' },
+              { n:'2', label:'User falls back to "Join from browser"',           note:'Appears to work normally',     color:'#f59e0b' },
+              { n:'3', label:'Tasks 1 & 2 complete successfully in browser',     note:'False confidence established', color:'#f59e0b' },
+              { n:'4', label:'Task 3 — Share Screen button is missing entirely', note:'Silent feature removal',       color:'#ef4444' },
+              { n:'5', label:'User is stuck. No recovery path visible.',         note:'Task abandoned',               color:'#b91c1c' },
+            ].map(({ n, label, note, color }) => (
+              <div key={n} className="flex items-center gap-3">
+                <div style={{ background: color }} className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0">
+                  <span className="text-xs font-bold">{n}</span>
+                </div>
+                <div className="flex-1 flex items-center justify-between">
+                  <span className="text-sm font-medium">{label}</span>
+                  <span className="text-xs text-slate-400 italic ml-4">{note}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Issues Identified</h3>
+        <div className="space-y-2">
+          {[
+            { id:'I04', label:'Entry path inconsistency (browser vs. app)',      sev:'critical' },
+            { id:'I14', label:'Portion of Screen option is hard to find',        sev:'critical' },
+            { id:'I20', label:'Video sound sharing off by default',              sev:'critical' },
+            { id:'I16', label:'Advanced tab has low visibility',                 sev:'high' },
+            { id:'I01', label:'Audio test option is hard to find',               sev:'medium' },
+          ].map(i => <IssueTag key={i.id} {...i} />)}
+        </div>
+      </div>
+    );
+
+    /* ── Section: Comparative Analysis ───────────────────────────────────── */
+    const ComparativeSection = () => (
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800 mb-1">Comparative Analysis</h2>
+        <p className="text-slate-400 text-sm mb-6">Cross-method convergence · Task difficulty · Method strengths</p>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Task Difficulty by Method</h3>
+        <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm mb-8">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-left p-3 text-slate-500 font-semibold">Task</th>
+                {['usability','pure','ai'].map(m => <th key={m} className="p-3"><Badge method={m} /></th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { label:'Task 1 — Join & Test Audio',             u:'medium', p:'medium', a:'medium' },
+                { label:'Task 2 — Private Chat & Captions',       u:'medium', p:'medium', a:'medium' },
+                { label:'Task 3 — Share Screen with Sound',        u:'hard',   p:'hard',   a:'hard'   },
+              ].map(({ label, u, p, a }) => (
+                <tr key={label} className="border-b border-gray-50 last:border-0">
+                  <td className="p-3 text-slate-700 font-medium">{label}</td>
+                  <td className="p-3 text-center"><Pill level={u} /></td>
+                  <td className="p-3 text-center"><Pill level={p} /></td>
+                  <td className="p-3 text-center"><Pill level={a} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Cross-Method Issue Coverage</h3>
+        <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm mb-8">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-left p-3 text-slate-500 font-semibold">Issue</th>
+                <th className="p-3 text-center font-semibold text-blue-600">UT</th>
+                <th className="p-3 text-center font-semibold text-amber-600">PURE</th>
+                <th className="p-3 text-center font-semibold text-emerald-600">AI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {SHARED.map(({ id, label, methods }) => (
+                <tr key={id} className="border-b border-gray-50 last:border-0">
+                  <td className="p-3 text-slate-700">
+                    <span className="font-mono text-xs text-slate-400 mr-2">{id}</span>{label}
+                  </td>
+                  {['usability','pure','ai'].map(m => (
+                    <td key={m} className="p-3 text-center">
+                      {methods.includes(m)
+                        ? <span className="text-emerald-500 font-bold"><CheckIcon/></span>
+                        : <span className="text-slate-200">—</span>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Method Strengths</h3>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { m:'usability', strengths:['Real user behavior', 'Emotional responses', 'Broadest issue coverage', 'Hesitation & confusion data'] },
+            { m:'pure',      strengths:['Workflow step precision', 'Friction quantification', 'Structured comparison', 'Efficient execution'] },
+            { m:'ai',        strengths:['Structural analysis', 'Path-dependency detection', 'Scalable & fast', 'Architecture-level insight'] },
+          ].map(({ m, strengths }) => (
+            <div key={m} style={{ background: MS[m].bg, borderColor: MS[m].border }} className="rounded-xl border p-4">
+              <div className="mb-3"><Badge method={m} /></div>
+              <ul className="space-y-1.5">
+                {strengths.map(s => (
+                  <li key={s} style={{ color: MS[m].text }} className="text-xs flex items-center gap-1.5">
+                    <span className="opacity-70"><CheckIcon/></span> {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+
+    /* ── Section: Recommendations ─────────────────────────────────────────── */
+    const RecommendationsSection = () => {
+      const recs = [
+        {
+          id:'R1', priority:'High',
+          title:'Redesign Meeting Entry Flow',
+          desc:'At the join screen, clearly communicate that browser join disables screen sharing. Add a feature-comparison notice or capability warning before the user makes the browser/app choice.',
+          methods:['usability','pure','ai'],
+          issues:['I04','I05'],
+        },
+        {
+          id:'R2', priority:'High',
+          title:'Improve Screen Sharing Workflow',
+          desc:'"Portion of Screen" should be surfaced at the top of the share panel, not buried. Sound sharing should be opt-out (on by default) with a clearly labeled toggle visible during setup.',
+          methods:['usability','pure','ai'],
+          issues:['I14','I20','I15','I18'],
+        },
+        {
+          id:'R3', priority:'Medium',
+          title:'Strengthen System Feedback & Default Visibility',
+          desc:'Show explicit mic/camera state confirmation on join. Make the audio test option prominent in the toolbar. Display sound-on/off status visibly when screen sharing is active.',
+          methods:['usability','pure'],
+          issues:['I11','I21','I08'],
+        },
+        {
+          id:'R4', priority:'Medium',
+          title:'Reduce Interface Complexity',
+          desc:'Move Captions to the main toolbar (not buried under "More"). Add lightweight onboarding cues for first-time users. Reduce visual density in dialogs and permission flows.',
+          methods:['usability'],
+          issues:['I09','I25','I26','I13'],
+        },
+      ];
+      return (
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800 mb-1">Recommendations</h2>
+          <p className="text-slate-500 text-sm mb-6 max-w-2xl leading-relaxed">Four prioritized design recommendations based on cross-method convergence. Issues confirmed by multiple methods received higher priority.</p>
+
+          <div className="space-y-4">
+            {recs.map(r => (
+              <div key={r.id} className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
+                <div className="flex flex-wrap items-center gap-3 mb-3">
+                  <span className="font-mono text-xs font-bold text-slate-400">{r.id}</span>
+                  <h4 className="font-semibold text-slate-800">{r.title}</h4>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${r.priority==='High' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {r.priority} Priority
+                  </span>
+                </div>
+                <p className="text-sm text-slate-500 mb-4 leading-relaxed">{r.desc}</p>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2">{r.methods.map(m => <Badge key={m} method={m} />)}</div>
+                  <div className="flex gap-1">
+                    {r.issues.map(id => (
+                      <span key={id} className="text-xs font-mono bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{id}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    /* ── Right Insight Panel ──────────────────────────────────────────────── */
+    const InsightPanel = () => (
+      <div className="w-60 flex-shrink-0 border-l border-gray-100 bg-slate-50 scrollable px-4 py-5">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-4">At a Glance</p>
+
+        <div className="mb-6">
+          <p className="text-xs font-semibold text-slate-600 mb-2">Confirmed by All 3 Methods</p>
+          <div className="space-y-2">
+            {SHARED.filter(i => i.methods.length === 3).map(issue => (
+              <div key={issue.id} className="bg-white border border-red-100 rounded-lg p-2.5">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0"></span>
+                  <span className="text-xs font-mono text-slate-400">{issue.id}</span>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">{issue.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-6">
+          <p className="text-xs font-semibold text-slate-600 mb-2">Task Difficulty</p>
+          <div className="space-y-2">
+            {[
+              { t:'Task 1 — Join & Audio',   l:'medium' },
+              { t:'Task 2 — Chat & Captions', l:'medium' },
+              { t:'Task 3 — Screen Share',    l:'hard'   },
+            ].map(({ t, l }) => (
+              <div key={t} className="flex items-center justify-between gap-2">
+                <span className="text-xs text-slate-500 flex-1 leading-tight">{t}</span>
+                <Pill level={l} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-xs font-semibold text-slate-600 mb-2">Issues by Method</p>
+          <div className="space-y-3">
+            {[{ m:'usability', n:25 }, { m:'pure', n:7 }, { m:'ai', n:5 }].map(({ m, n }) => (
+              <div key={m}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-slate-500">{MS[m].label}</span>
+                  <span style={{ color: MS[m].dot }} className="text-xs font-bold">{n}</span>
+                </div>
+                <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div style={{ width:`${(n/26)*100}%`, background: MS[m].dot }} className="h-full rounded-full transition-all"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+
+    /* ── Sidebar ─────────────────────────────────────────────────────────── */
+    const ICONS = {
+      summary:         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 10h16M4 14h10"/></svg>,
+      usability:       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>,
+      pure:            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>,
+      ai:              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17H3a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2h-2"/></svg>,
+      comparative:     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>,
+      recommendations: <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>,
+    };
+
+    const Sidebar = ({ active, onSelect }) => (
+      <div className="w-56 flex-shrink-0 bg-white border-r border-gray-100 scrollable flex flex-col">
+        <div className="px-4 py-4 border-b border-gray-100">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Study</p>
+          <p className="text-xs text-slate-700 font-semibold">Zoom Desktop Evaluation</p>
+          <p className="text-xs text-slate-400 mt-0.5">3 methods · 26 issues · 3 tasks</p>
+        </div>
+        <nav className="flex-1 px-3 py-3">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-2">Sections</p>
+          <div className="space-y-0.5">
+            {NAV.map(item => (
+              <button key={item.id} onClick={() => onSelect(item.id)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-left transition-all ${
+                  active === item.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'
+                }`}>
+                <span className={active === item.id ? 'text-blue-500' : 'text-slate-400'}>{ICONS[item.id]}</span>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </nav>
+        <div className="px-4 py-4 border-t border-gray-100">
+          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Methods</p>
+          <div className="space-y-1.5">
+            {Object.entries(MS).map(([k, s]) => (
+              <div key={k} className="flex items-center gap-2">
+                <span style={{ background: s.dot }} className="w-2 h-2 rounded-full flex-shrink-0"></span>
+                <span className="text-xs text-slate-500">{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+
+    /* ── Top Bar ─────────────────────────────────────────────────────────── */
+    const TopBar = ({ section }) => {
+      const label = NAV.find(n => n.id === section)?.label || '';
+      return (
+        <div style={{ height: 52 }} className="bg-slate-800 flex items-center px-5 gap-4 flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-md bg-blue-500 flex items-center justify-center">
+              <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+              </svg>
+            </div>
+            <span className="text-white font-semibold text-sm">UX Research Dashboard</span>
+            <span className="text-slate-500 text-sm">·</span>
+            <span className="text-slate-400 text-sm">Zoom Desktop Study</span>
+          </div>
+          <div className="flex-1"></div>
+          <div className="flex gap-2">
+            {['usability','pure','ai'].map(m => (
+              <span key={m} style={{ background: MS[m].bg, color: MS[m].text, border:`1px solid ${MS[m].border}` }}
+                className="text-xs px-2 py-1 rounded-full font-medium">
+                {MS[m].short}: {m==='usability'?25:m==='pure'?7:5}
+              </span>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    /* ── App ─────────────────────────────────────────────────────────────── */
+    const SECTIONS = { summary: SummarySection, usability: UsabilitySection, pure: PURESection, ai: AISection, comparative: ComparativeSection, recommendations: RecommendationsSection };
+
+    const App = () => {
+      const [active, setActive] = useState('summary');
+      const Content = SECTIONS[active] || SummarySection;
+      return (
+        <div className="flex flex-col h-screen">
+          <TopBar section={active} />
+          <div className="flex flex-1 overflow-hidden">
+            <Sidebar active={active} onSelect={setActive} />
+            <main className="flex-1 scrollable bg-white">
+              <div className="max-w-3xl mx-auto px-8 py-8">
+                <Content />
+              </div>
+            </main>
+            <InsightPanel />
+          </div>
+        </div>
+      );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
